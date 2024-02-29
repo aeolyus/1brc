@@ -43,36 +43,38 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	result, err := eval(*input)
+	err := eval(*input, os.Stdout)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(result)
 }
 
 // eval takes a file path, parses the stations statistics, and returns a
 // formatted string of the results
-func eval(fpath string) (string, error) {
+func eval(fpath string, w io.Writer) error {
 	ss, err := readStats(fpath)
 	if err != nil {
-		return "", fmt.Errorf("error parsing statistics: %w", err)
+		return fmt.Errorf("error parsing statistics: %w", err)
 	}
-	return format(ss), nil
+	format(ss, w)
+	return nil
 }
 
 // format will take a map of station statistics and a sorted list of stations
 // and return the properly formatted string output
-func format(ss *stationStats) string {
-	var s strings.Builder
-	for _, station := range ss.stations {
+func format(ss *stationStats, w io.Writer) {
+	io.WriteString(w, "{")
+	for i, station := range ss.stations {
 		v := ss.stats[station]
-		s.WriteString(fmt.Sprintf(
-			"%s=%.1f/%.1f/%.1f, ",
+		io.WriteString(w, fmt.Sprintf(
+			"%s=%.1f/%.1f/%.1f",
 			station, v.min, round(v.sum/v.count), v.max,
 		))
+		if i < len(ss.stations)-1 {
+			io.WriteString(w, ", ")
+		}
 	}
-	// Remove trailing ", "
-	return "{" + s.String()[:len(s.String())-2] + "}\n"
+	io.WriteString(w, "}\n")
 }
 
 // readStats reads the input file given the file path and returns a map of

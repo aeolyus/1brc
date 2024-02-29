@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,8 @@ func TestEval(t *testing.T) {
 	}
 	for _, file := range inputFiles {
 		t.Run(filepath.Base(file), func(t *testing.T) {
-			actual, err := eval(file + sampleInputExt)
+			var actual strings.Builder
+			err := eval(file+sampleInputExt, &actual)
 			if err != nil {
 				t.Errorf("could not evaluate input: %v", err)
 			}
@@ -30,7 +32,7 @@ func TestEval(t *testing.T) {
 			if err != nil {
 				t.Errorf("could not read output file: %v", err)
 			}
-			assert.Equal(t, expected, actual)
+			assert.Equal(t, expected, actual.String())
 		})
 	}
 }
