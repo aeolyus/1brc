@@ -98,14 +98,9 @@ func readStats(fpath string) (*stationStats, error) {
 		} else if err != nil {
 			return nil, fmt.Errorf("error reading line: %w", err)
 		}
-		arr := strings.Split(str, ";")
-		if len(arr) != 2 {
-			return nil, fmt.Errorf("invalid input: '%s'", str)
-		}
-		station := arr[0]
-		temp, err := strconv.ParseFloat(arr[1], 64)
+		station, temp, err := parseLine(str)
 		if err != nil {
-			return nil, fmt.Errorf("parse float error: %w", err)
+			return nil, fmt.Errorf("line parse error: %w", err)
 		}
 		if val, ok := stats[station]; ok {
 			val.count += 1
@@ -126,6 +121,20 @@ func readStats(fpath string) (*stationStats, error) {
 	sort.Strings(stations)
 
 	return &stationStats{stats, stations}, nil
+}
+
+// parseLine will parse an input string of the format "station;temperature" and
+// return the extracted station name as a string and temperature as a float
+//
+// By avoiding strings.Split, we can avoid allocating a string slice
+func parseLine(s string) (string, float64, error) {
+	i := strings.Index(s, ";")
+	station := s[:i]
+	temp, err := strconv.ParseFloat(s[i+1:], 64)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse float error: %w", err)
+	}
+	return station, temp, err
 }
 
 // round rounds a float with IEEE 754 roundTowardPositive to one decimal place
