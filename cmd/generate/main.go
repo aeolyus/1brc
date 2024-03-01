@@ -465,6 +465,7 @@ func main() {
 
 	start := time.Now()
 	w := bufio.NewWriter(f)
+	defer w.Flush()
 	for i := 0; i < *size; i++ {
 		if i > 0 && i%50_000_000 == 0 {
 			log.Printf(
