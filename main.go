@@ -129,6 +129,9 @@ func readStats(fpath string) (*stationStats, error) {
 // By avoiding strings.Split, we can avoid allocating a string slice
 func parseLine(s string) (string, float64, error) {
 	i := strings.Index(s, ";")
+	if i == -1 {
+		return "", 0, fmt.Errorf("missing delimiter: %s", s)
+	}
 	station := s[:i]
 	temp, err := strconv.ParseFloat(s[i+1:], 64)
 	if err != nil {
