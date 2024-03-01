@@ -3,12 +3,12 @@ package main
 import (
 	"bufio"
 	"flag"
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"os"
 	"runtime/pprof"
+	"strconv"
 	"time"
 )
 
@@ -17,9 +17,9 @@ type weatherStation struct {
 	meanTemp float64
 }
 
-func (w weatherStation) measurement() float64 {
+func (w weatherStation) measurement() int {
 	m := rand.NormFloat64()*10 + w.meanTemp
-	return math.Ceil(m*10) / 10
+	return int(math.Ceil(m * 10))
 }
 
 var stations = []weatherStation{
@@ -473,12 +473,10 @@ func main() {
 			)
 		}
 		station := stations[rand.Intn(len(stations))]
-		_, err := fmt.Fprintf(
-			w,
-			"%s;%.1f\n",
-			station.id,
-			station.measurement(),
-		)
+		temp := station.measurement()
+		_, err := w.WriteString(station.id + ";" +
+			strconv.Itoa(temp/10) + "." +
+			strconv.Itoa(temp%10) + "\n")
 		if err != nil {
 			log.Fatal("error writing measurements: ", err)
 		}
