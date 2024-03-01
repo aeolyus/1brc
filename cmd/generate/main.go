@@ -477,7 +477,7 @@ func main() {
 		temp := station.measurement()
 		_, err := w.WriteString(station.id + ";" +
 			strconv.Itoa(temp/10) + "." +
-			strconv.Itoa(temp%10) + "\n")
+			strconv.Itoa(int(math.Abs(float64(temp%10)))) + "\n")
 		if err != nil {
 			log.Fatal("error writing measurements: ", err)
 		}
