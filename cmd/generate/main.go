@@ -439,6 +439,7 @@ var stations = []weatherStation{
 }
 
 var size = flag.Int("size", 0, "number of records to create")
+var out = flag.String("out", "measurements.txt", "file to write to")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 func main() {
@@ -456,7 +457,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	f, err := os.Create("measurements.txt")
+	f, err := os.Create(*out)
 	if err != nil {
 		log.Fatal("could not create measurements file: ", err)
 	}
