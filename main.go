@@ -83,29 +83,72 @@ func format(ss stationStats, w io.Writer) {
 // readStats reads the input file given the file path and returns a map of
 // station statistics and a sorted list of the stations
 func readStats(fpath string) (stationStats, error) {
-	file, err := os.Open(fpath)
-	if err != nil {
-		log.Fatal(fmt.Errorf("could not open file: %w", err))
-	}
-	defer file.Close()
-
-	var wg sync.WaitGroup
 	chunkChan := make(chan []byte)
 	statsChan := make(chan map[string]stat)
+
+	go reader(fpath, chunkChan)
+
+	var wg sync.WaitGroup
 	for i := 0; i < runtime.NumCPU()-1; i++ {
 		wg.Add(1)
 		go worker(&wg, chunkChan, statsChan)
 	}
 
+	resultChan := make(chan stationStats)
+	go aggregator(statsChan, resultChan)
+
+	wg.Wait()
+	close(statsChan)
+
+	return <-resultChan, nil
+}
+
+// aggregator reads a stream of maps of stats and aggregates them all before
+// sending it down a result channel
+func aggregator(
+	statsChan <-chan map[string]stat,
+	resultChan chan<- stationStats,
+) {
+	stations := []string{}
+	stats := make(map[string]stat)
+	for partialStats := range statsChan {
+		for k, v := range partialStats {
+			if val, ok := stats[k]; ok {
+				val.count += v.count
+				val.sum += v.sum
+				val.min = min(val.min, v.min)
+				val.max = max(val.max, v.max)
+				stats[k] = val
+			} else {
+				stats[k] = v
+				stations = append(stations, k)
+			}
+		}
+	}
+
+	sort.Strings(stations)
+
+	resultChan <- stationStats{stats, stations}
+	close(resultChan)
+}
+
+// reader reads a file chunk by chunk and forwards the chunks to a channel
+func reader(fpath string, chunkChan chan<- []byte) error {
+	f, err := os.Open(fpath)
+	if err != nil {
+		return fmt.Errorf("could not open file: %w", err)
+	}
+	defer f.Close()
+
 	readBuf := make([]byte, chunkSize)
 	leftOver := make([]byte, 0, chunkSize)
 	for {
-		numBytesRead, err := file.Read(readBuf)
+		numBytesRead, err := f.Read(readBuf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return stationStats{}, fmt.Errorf("error reading file: %w", err)
+			return fmt.Errorf("error reading file: %w", err)
 		}
 
 		readBuf = readBuf[:numBytesRead]
@@ -115,38 +158,7 @@ func readStats(fpath string) (stationStats, error) {
 		chunkChan <- sendBuf
 	}
 	close(chunkChan)
-
-	result := make(chan stationStats)
-
-	go func() {
-		stations := []string{}
-		stats := make(map[string]stat)
-		for partialStats := range statsChan {
-			for k, v := range partialStats {
-				if val, ok := stats[k]; ok {
-					val.count += v.count
-					val.sum += v.sum
-					val.min = min(val.min, v.min)
-					val.max = max(val.max, v.max)
-					stats[k] = val
-				} else {
-					stats[k] = v
-					stations = append(stations, k)
-				}
-			}
-		}
-
-		sort.Strings(stations)
-
-		result <- stationStats{stats, stations}
-	}()
-	wg.Wait()
-	close(statsChan)
-
-	a := <-result
-	close(result)
-
-	return a, nil
+	return nil
 }
 
 // worker processes strings fed to it by the lines channel input and writes its
