@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,11 +13,10 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 )
 
-const batchSize = 10_000_000
+const chunkSize = 64 * 1024 * 1024 // 64 MiB
 
 var input = flag.String("input", "", "input file path")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -91,35 +90,31 @@ func readStats(fpath string) (stationStats, error) {
 	defer file.Close()
 
 	var wg sync.WaitGroup
-	linesChan := make(chan []string)
+	chunkChan := make(chan []byte)
 	statsChan := make(chan map[string]stat)
-
 	for i := 0; i < runtime.NumCPU()-1; i++ {
 		wg.Add(1)
-		go worker(&wg, linesChan, statsChan)
+		go worker(&wg, chunkChan, statsChan)
 	}
 
-	reader := bufio.NewReader(file)
-	batch := make([]string, 0, batchSize)
+	readBuf := make([]byte, chunkSize)
+	leftOver := make([]byte, 0, chunkSize)
 	for {
-		str, err := reader.ReadString('\n')
-		str = strings.TrimSpace(str)
-		if errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return stationStats{},
-				fmt.Errorf("error reading line: %w", err)
+		numBytesRead, err := file.Read(readBuf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return stationStats{}, fmt.Errorf("error reading file: %w", err)
 		}
-		batch = append(batch, str)
-		if len(batch) >= batchSize {
-			linesChan <- batch
-			batch = batch[:0]
-		}
+
+		readBuf = readBuf[:numBytesRead]
+		lastLineIdx := bytes.LastIndex(readBuf, []byte{'\n'})
+		sendBuf := append(leftOver, readBuf[:lastLineIdx+1]...)
+		copy(leftOver, readBuf[lastLineIdx+1:])
+		chunkChan <- sendBuf
 	}
-	if len(batch) > 0 {
-		linesChan <- batch
-	}
-	close(linesChan)
+	close(chunkChan)
 
 	result := make(chan stationStats)
 
@@ -158,53 +153,50 @@ func readStats(fpath string) (stationStats, error) {
 // stats map results into the stats channel
 func worker(
 	wg *sync.WaitGroup,
-	linesChan <-chan []string,
+	chunkChan <-chan []byte,
 	statsChan chan<- map[string]stat,
 ) error {
 	defer wg.Done()
 	stats := make(map[string]stat)
-	for lines := range linesChan {
-		for _, line := range lines {
-			str := strings.TrimSpace(line)
-			station, temp, err := parseLine(str)
-			if err != nil {
-				return fmt.Errorf("line parse error: %w", err)
-			}
-			if val, ok := stats[station]; ok {
-				val.count += 1
-				val.sum += temp
-				val.min = min(val.min, temp)
-				val.max = max(val.max, temp)
-				stats[station] = val
-			} else {
-				stats[station] = stat{
-					count: 1,
-					min:   temp,
-					max:   temp,
-					sum:   temp,
+	for chunk := range chunkChan {
+		strChunk := string(chunk)
+		start := 0
+		var station string
+		for i, ch := range strChunk {
+			if ch == ';' {
+				station = strChunk[start:i]
+				start = i + 1
+			} else if ch == '\n' {
+				temp, err := strconv.ParseFloat(
+					strChunk[start:i],
+					64,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"parse float error: %w",
+						err,
+					)
 				}
+				if val, ok := stats[station]; ok {
+					val.count++
+					val.sum += temp
+					val.min = min(val.min, temp)
+					val.max = max(val.max, temp)
+					stats[station] = val
+				} else {
+					stats[station] = stat{
+						count: 1,
+						min:   temp,
+						max:   temp,
+						sum:   temp,
+					}
+				}
+				start = i + 1
 			}
 		}
 	}
 	statsChan <- stats
 	return nil
-}
-
-// parseLine will parse an input string of the format "station;temperature" and
-// return the extracted station name as a string and temperature as a float
-//
-// By avoiding strings.Split, we can avoid allocating a string slice
-func parseLine(s string) (string, float64, error) {
-	i := strings.Index(s, ";")
-	if i == -1 {
-		return "", 0, fmt.Errorf("missing delimiter: %s", s)
-	}
-	station := s[:i]
-	temp, err := strconv.ParseFloat(s[i+1:], 64)
-	if err != nil {
-		return "", 0, fmt.Errorf("parse float error: %w", err)
-	}
-	return station, temp, err
 }
 
 // round rounds a float with IEEE 754 roundTowardPositive to one decimal place
