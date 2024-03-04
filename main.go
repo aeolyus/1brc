@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
-	"strconv"
 	"sync"
 )
 
@@ -180,16 +179,7 @@ func worker(
 				station = strChunk[start:i]
 				start = i + 1
 			} else if ch == '\n' {
-				temp, err := strconv.ParseFloat(
-					strChunk[start:i],
-					64,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"parse float error: %w",
-						err,
-					)
-				}
+				temp := parseFloat(strChunk[start:i])
 				if val, ok := stats[station]; ok {
 					val.count++
 					val.sum += temp
@@ -210,6 +200,29 @@ func worker(
 	}
 	statsChan <- stats
 	return nil
+}
+
+// parseFloat is a custom float parser optimized for the given contraint that
+// the input is within the range [-99.9, 99.9]
+func parseFloat(s string) float64 {
+	var neg bool
+	if s[0] == '-' {
+		neg = true
+		s = s[1:]
+	}
+	num := 0.0
+	if len(s) == 3 {
+		num = float64(int(s[0])-int('0')) +
+			float64(int(s[2])-int('0'))/10
+	} else {
+		num = float64(int(s[0])-int('0'))*10 +
+			float64(int(s[1])-int('0')) +
+			float64(int(s[3])-int('0'))/10
+	}
+	if neg {
+		num = -num
+	}
+	return num
 }
 
 // round rounds a float with IEEE 754 roundTowardPositive to one decimal place
