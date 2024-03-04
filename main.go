@@ -91,7 +91,7 @@ func readStats(fpath string) (stationStats, error) {
 	go reader(fpath, chunkChan)
 
 	var wg sync.WaitGroup
-	for i := 0; i < runtime.NumCPU()-1; i++ {
+	for i := 0; i < runtime.NumCPU(); i++ {
 		wg.Add(1)
 		go worker(&wg, chunkChan, statsChan)
 	}
