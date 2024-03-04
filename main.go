@@ -141,6 +141,7 @@ func reader(fpath string, chunkChan chan<- []byte) error {
 
 	readBuf := make([]byte, chunkSize)
 	leftOver := make([]byte, 0, chunkSize)
+	leftOverIdx := 0
 	for {
 		numBytesRead, err := f.Read(readBuf)
 		if err != nil {
@@ -153,7 +154,8 @@ func reader(fpath string, chunkChan chan<- []byte) error {
 		readBuf = readBuf[:numBytesRead]
 		lastLineIdx := bytes.LastIndex(readBuf, []byte{'\n'})
 		sendBuf := append(leftOver, readBuf[:lastLineIdx+1]...)
-		leftOver = make([]byte, len(readBuf[lastLineIdx+1:]))
+		leftOverIdx = len(readBuf) - lastLineIdx - 1
+		leftOver = leftOver[:leftOverIdx]
 		copy(leftOver, readBuf[lastLineIdx+1:])
 		chunkChan <- sendBuf
 	}
