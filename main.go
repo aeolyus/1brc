@@ -21,10 +21,10 @@ var input = flag.String("input", "", "input file path")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 type stat struct {
-	min   float64
-	max   float64
-	count float64
-	sum   float64
+	min   int64
+	max   int64
+	count int64
+	sum   int64
 }
 
 type stationStats struct {
@@ -70,7 +70,10 @@ func format(ss stationStats, w io.Writer) {
 		v := ss.stats[station]
 		io.WriteString(w, fmt.Sprintf(
 			"%s=%.1f/%.1f/%.1f",
-			station, v.min, round(v.sum/v.count), v.max,
+			station,
+			float64(v.min)/10,
+			round(float64(v.sum)/float64(v.count)),
+			float64(v.max)/10,
 		))
 		if i < len(ss.stations)-1 {
 			io.WriteString(w, ", ")
@@ -204,20 +207,20 @@ func worker(
 
 // parseFloat is a custom float parser optimized for the given contraint that
 // the input is within the range [-99.9, 99.9]
-func parseFloat(s string) float64 {
+func parseFloat(s string) int64 {
 	var neg bool
 	if s[0] == '-' {
 		neg = true
 		s = s[1:]
 	}
-	num := 0.0
+	var num int64
 	if len(s) == 3 {
-		num = float64(int(s[0])-int('0')) +
-			float64(int(s[2])-int('0'))/10
+		num = (int64(s[0])-int64('0'))*10 +
+			(int64(s[2]) - int64('0'))
 	} else {
-		num = float64(int(s[0])-int('0'))*10 +
-			float64(int(s[1])-int('0')) +
-			float64(int(s[3])-int('0'))/10
+		num = (int64(s[0])-int64('0'))*100 +
+			(int64(s[1])-int64('0'))*10 +
+			(int64(s[3]) - int64('0'))
 	}
 	if neg {
 		num = -num
@@ -227,5 +230,5 @@ func parseFloat(s string) float64 {
 
 // round rounds a float with IEEE 754 roundTowardPositive to one decimal place
 func round(f float64) float64 {
-	return math.Ceil(f*10) / 10
+	return math.Ceil(f) / 10
 }
