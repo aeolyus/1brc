@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"flag"
@@ -90,7 +91,7 @@ func readStats(fpath string) (*stationStats, error) {
 	chunkChan := make(chan []byte)
 	statsChan := make(chan map[string]*stat)
 
-	go reader(fpath, chunkChan)
+	go reader(fpath, *jobs, chunkChan)
 
 	var wg sync.WaitGroup
 	for i := 0; i < *jobs; i++ {
@@ -136,31 +137,107 @@ func aggregator(
 }
 
 // reader reads a file chunk by chunk and forwards the chunks to a channel
-func reader(fpath string, chunkChan chan<- []byte) error {
-	f, err := os.Open(fpath)
+func reader(fpath string, jobs int, chunkChan chan<- []byte) error {
+	file, err := os.Open(fpath)
 	if err != nil {
 		return fmt.Errorf("could not open file: %w", err)
 	}
-	defer f.Close()
+	defer file.Close()
 
-	readBuf := make([]byte, chunkSize)
-	leftOver := make([]byte, 0, chunkSize)
-	for {
-		numBytesRead, err := f.Read(readBuf)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return fmt.Errorf("error reading file: %w", err)
-		}
-
-		readBuf = readBuf[:numBytesRead]
-		lastLineIdx := bytes.LastIndex(readBuf, []byte{'\n'})
-		sendBuf := append(leftOver, readBuf[:lastLineIdx+1]...)
-		leftOver = make([]byte, len(readBuf[lastLineIdx+1:]))
-		copy(leftOver, readBuf[lastLineIdx+1:])
-		chunkChan <- sendBuf
+	// Get the file size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		fmt.Println("Error getting file info:", err)
 	}
+	fileSize := fileInfo.Size()
+
+	// Get number of chunks and chunks per reader
+	chunks := (fileSize + chunkSize - 1) / chunkSize
+	chunksPerReader := (chunks + int64(jobs) - 1) / int64(jobs)
+
+	var wg sync.WaitGroup
+	for i := 0; i < jobs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			file, _ := os.Open(fpath)
+			defer file.Close()
+
+			start := int64(i) * chunksPerReader * chunkSize
+			end := start + chunksPerReader*chunkSize
+			end = min(end, fileSize)
+			// Buffer to read chunks into
+			buf := make([]byte, chunkSize)
+
+			// Read file by chunks
+			for pos, n := start, 0; pos < end; pos += int64(n) {
+				// Read a chunk
+				n, err = file.ReadAt(buf, pos)
+				if err != nil && !errors.Is(err, io.EOF) {
+					panic(err)
+				}
+
+				// Don't read past chunk limits
+				n = min(n, int(end-pos))
+				buf = buf[:n]
+
+				// If no bytes were read, break the loop
+				if n == 0 {
+					break
+				}
+
+				// If not the first chunk in the file and is
+				// first chunk in this worker, read from after
+				// the first new line
+				//
+				// aaa;1.2
+				// bbb;3.4
+				// ccc;5.6
+				//
+				// The above example may be split into chunks
+				// as follows below
+				//
+				// aaa;1.2
+				//  +--- chunk split here
+				//  |
+				//  v
+				// bbb;3.4
+				// ccc;5.6
+				//
+				// worker 1          | worker 2
+				// [(chunk1, chunk2) | (chunk3, chunk4)]
+				// ...aaa;1.2\nbb    | b;3.4\nccc;...
+				//
+				// In this case, we want worker 1 to read the
+				// full line of bbb and worker 2 to start
+				// reading at ccc.
+				if pos != 0 && pos == start {
+					i := bytes.Index(buf, []byte{'\n'})
+					buf = buf[i+1:]
+				}
+				_, err := file.Seek(pos+int64(n), 0)
+				reader := bufio.NewReader(file)
+				overflow, err := reader.ReadBytes('\n')
+				if err != nil && !errors.Is(err, io.EOF) {
+					panic(err)
+				}
+
+				send := make([]byte, len(buf))
+				copy(send, buf)
+				// fmt.Fprintln(os.Stderr, "BEFORE:", string(send[len(send)-30:]))
+				send = append(send, overflow...)
+				// fmt.Fprintln(os.Stderr, "OVERFLOW:", string(overflow))
+				n += len(overflow)
+
+				// fmt.Fprintln(os.Stderr, "SEND:", string(send[len(send)-30:]))
+				// fmt.Fprintln(os.Stderr, "------")
+				chunkChan <- send
+
+			}
+		}(i)
+	}
+
+	wg.Wait()
 	close(chunkChan)
 	return nil
 }
