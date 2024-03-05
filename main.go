@@ -18,6 +18,7 @@ import (
 const chunkSize = 64 * 1024 * 1024 // 64 MiB
 
 var input = flag.String("input", "", "input file path")
+var jobs = flag.Int("jobs", runtime.NumCPU(), "number of concurrent jobs")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 type stat struct {
@@ -88,7 +89,7 @@ func readStats(fpath string) (stationStats, error) {
 	go reader(fpath, chunkChan)
 
 	var wg sync.WaitGroup
-	for i := 0; i < runtime.NumCPU()-1; i++ {
+	for i := 0; i < *jobs; i++ {
 		wg.Add(1)
 		go worker(&wg, chunkChan, statsChan)
 	}
