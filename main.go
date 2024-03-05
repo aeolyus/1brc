@@ -29,7 +29,7 @@ type stat struct {
 }
 
 type stationStats struct {
-	stats    map[string]stat
+	stats    map[string]*stat
 	stations []string
 }
 
@@ -65,7 +65,7 @@ func eval(fpath string, w io.Writer) error {
 
 // format will take a map of station statistics and a sorted list of stations
 // and return the properly formatted string output
-func format(ss stationStats, w io.Writer) {
+func format(ss *stationStats, w io.Writer) {
 	io.WriteString(w, "{")
 	for i, station := range ss.stations {
 		v := ss.stats[station]
@@ -82,9 +82,9 @@ func format(ss stationStats, w io.Writer) {
 
 // readStats reads the input file given the file path and returns a map of
 // station statistics and a sorted list of the stations
-func readStats(fpath string) (stationStats, error) {
+func readStats(fpath string) (*stationStats, error) {
 	chunkChan := make(chan []byte)
-	statsChan := make(chan map[string]stat)
+	statsChan := make(chan map[string]*stat)
 
 	go reader(fpath, chunkChan)
 
@@ -94,7 +94,7 @@ func readStats(fpath string) (stationStats, error) {
 		go worker(&wg, chunkChan, statsChan)
 	}
 
-	resultChan := make(chan stationStats)
+	resultChan := make(chan *stationStats)
 	go aggregator(statsChan, resultChan)
 
 	wg.Wait()
@@ -106,11 +106,11 @@ func readStats(fpath string) (stationStats, error) {
 // aggregator reads a stream of maps of stats and aggregates them all before
 // sending it down a result channel
 func aggregator(
-	statsChan <-chan map[string]stat,
-	resultChan chan<- stationStats,
+	statsChan <-chan map[string]*stat,
+	resultChan chan<- *stationStats,
 ) {
 	stations := []string{}
-	stats := make(map[string]stat)
+	stats := make(map[string]*stat)
 	for partialStats := range statsChan {
 		for k, v := range partialStats {
 			if val, ok := stats[k]; ok {
@@ -118,7 +118,6 @@ func aggregator(
 				val.sum += v.sum
 				val.min = min(val.min, v.min)
 				val.max = max(val.max, v.max)
-				stats[k] = val
 			} else {
 				stats[k] = v
 				stations = append(stations, k)
@@ -128,7 +127,7 @@ func aggregator(
 
 	sort.Strings(stations)
 
-	resultChan <- stationStats{stats, stations}
+	resultChan <- &stationStats{stats, stations}
 	close(resultChan)
 }
 
@@ -167,10 +166,10 @@ func reader(fpath string, chunkChan chan<- []byte) error {
 func worker(
 	wg *sync.WaitGroup,
 	chunkChan <-chan []byte,
-	statsChan chan<- map[string]stat,
+	statsChan chan<- map[string]*stat,
 ) error {
 	defer wg.Done()
-	stats := make(map[string]stat)
+	stats := make(map[string]*stat)
 	for chunk := range chunkChan {
 		strChunk := string(chunk)
 		start := 0
@@ -186,9 +185,8 @@ func worker(
 					val.sum += temp
 					val.min = min(val.min, temp)
 					val.max = max(val.max, temp)
-					stats[station] = val
 				} else {
-					stats[station] = stat{
+					stats[station] = &stat{
 						count: 1,
 						min:   temp,
 						max:   temp,
