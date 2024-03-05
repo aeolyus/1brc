@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -51,7 +55,6 @@ func main() {
 	chunksPerReader := (chunks + int64(*jobs) - 1) / int64(*jobs)
 
 	out := make(chan []byte)
-
 	var wg sync.WaitGroup
 	for i := 0; i < *jobs; i++ {
 		wg.Add(1)
@@ -61,30 +64,70 @@ func main() {
 
 			start := int64(i) * chunksPerReader * chunkSize
 			end := start + chunksPerReader*chunkSize
-			if end > fileSize {
-				end = fileSize
-			}
+			end = min(end, fileSize)
 			// Buffer to read chunks into
 			buf := make([]byte, chunkSize)
 
-			n := 0
 			// Read file by chunks
-			for pos := start; pos < end; pos += int64(n) {
+			for pos, n := start, 0; pos < end; pos += int64(n) {
 				// Read a chunk
 				n, err = file.ReadAt(buf, pos)
-				if err != nil && err.Error() != "EOF" {
-					fmt.Println("Error:", err)
-					break
+				if err != nil && !errors.Is(err, io.EOF) {
+					panic(err)
 				}
+
+				// Don't read past chunk limits
+				n = min(n, int(end-pos))
+				buf = buf[:n]
 
 				// If no bytes were read, break the loop
 				if n == 0 {
 					break
 				}
 
-				send := make([]byte, n)
-				copy(send, buf[:n])
+				// If not the first chunk in the file and is
+				// first chunk in this worker, read from after
+				// the first new line
+				//
+				// aaa;1.2
+				// bbb;3.4
+				// ccc;5.6
+				//
+				// The above example may be split into chunks
+				// as follows below
+				//
+				// aaa;1.2
+				//  +--- chunk split here
+				//  |
+				//  v
+				// bbb;3.4
+				// ccc;5.6
+				//
+				// worker 1          | worker 2
+				// [(chunk1, chunk2) | (chunk3, chunk4)]
+				// ...aaa;1.2\nbb    | b;3.4\nccc;...
+				//
+				// In this case, we want worker 1 to read the
+				// full line of bbb and worker 2 to start
+				// reading at ccc.
+				if pos != 0 && pos == start {
+					i := bytes.Index(buf, []byte{'\n'})
+					buf = buf[i+1:]
+				}
+				_, err := file.Seek(pos+int64(n), 0)
+				reader := bufio.NewReader(file)
+				overflow, err := reader.ReadBytes('\n')
+				if err != nil && !errors.Is(err, io.EOF) {
+					panic(err)
+				}
+
+				send := make([]byte, len(buf))
+				copy(send, buf)
+				send = append(send, overflow...)
+				n += len(overflow)
+
 				out <- send
+
 			}
 		}(i)
 	}
