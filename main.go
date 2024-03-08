@@ -35,6 +35,10 @@ type stationStats struct {
 
 func main() {
 	flag.Parse()
+	if *input == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
