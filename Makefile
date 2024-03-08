@@ -1,7 +1,16 @@
 default: help
 
 .PHONY: lint
-lint: vet fmt ## Format and vet the code
+lint: vet fmt ## Format and vet code
+
+.PHONY: ci-lint
+ci-lint: vet ## Check code format and vet code
+## Specifically for CI, this will fail on any unformatted code.
+	@test -n "$$(gofmt -l .)" \
+		&& echo 'Files below need formatting, run `make fmt`:' \
+		&& gofmt -l . \
+		&& exit 1 \
+		|| exit 0
 
 .PHONY: vet
 vet:
