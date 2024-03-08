@@ -445,6 +445,11 @@ var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 func main() {
 	flag.Parse()
 
+	if *size <= 0 {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
